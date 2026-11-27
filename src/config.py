@@ -30,22 +30,20 @@ class ConfigError(ValueError):
 
 
 def _ssl_context() -> ssl.SSLContext:
-    """Return a TLS context with a CA store that exists on this machine.
+    """Return a TLS context that works on any of the shipped platforms.
 
     Frozen binaries bundle the build container's OpenSSL, whose compiled-in CA
     paths (e.g. /etc/pki/tls/certs on manylinux) often do not exist on the
-    target machine. In that case the default context has no trust roots and
-    every HTTPS request fails with CERTIFICATE_VERIFY_FAILED. Fall back to the
-    certifi roots bundled by PyInstaller, while still preferring the system
-    store (and any custom CAs installed there) when it is available.
+    target machine. Always load the certifi roots bundled by PyInstaller, then
+    add the platform store as well so locally installed/custom CAs keep working
+    on Windows, Termux and Linux. A missing store is harmless.
     """
+    context = ssl.create_default_context(cafile=certifi.where())
     try:
-        context = ssl.create_default_context()
-        if context.get_ca_certs():
-            return context
+        context.load_default_certs()
     except (OSError, ValueError, ssl.SSLError):
         pass
-    return ssl.create_default_context(cafile=certifi.where())
+    return context
 
 
 def validate_domain(value: object) -> str:

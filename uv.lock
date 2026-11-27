@@ -48,6 +48,37 @@ wheels = [
 ]
 
 [[package]]
+name = "eiga-cli"
+version = "0.6.4"
+source = { editable = "." }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "certifi" },
+    { name = "httpx" },
+    { name = "inquirerpy" },
+    { name = "lxml" },
+    { name = "rich" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyinstaller" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.15.0" },
+    { name = "certifi", specifier = ">=2024.8.30" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "inquirerpy", specifier = ">=0.3.4" },
+    { name = "lxml", specifier = ">=6.1.1" },
+    { name = "rich", specifier = ">=15.0.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pyinstaller", specifier = ">=6.21.0" }]
+
+[[package]]
 name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -277,37 +308,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626
 wheels = [
     { url = "https://files.pythonhosted.org/packages/df/b2/87e62e8c3e2f4b32e5fe99e0b86d576da1312593b39f47d8ceef365e95ed/packaging-26.2-py3-none-any.whl", hash = "sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e", size = 100195, upload-time = "2026-04-24T20:15:22.081Z" },
 ]
-
-[[package]]
-name = "eiga-cli"
-version = "0.6.3"
-source = { editable = "." }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "certifi" },
-    { name = "httpx" },
-    { name = "inquirerpy" },
-    { name = "lxml" },
-    { name = "rich" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pyinstaller" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "beautifulsoup4", specifier = ">=4.15.0" },
-    { name = "certifi", specifier = ">=2024.8.30" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "inquirerpy", specifier = ">=0.3.4" },
-    { name = "lxml", specifier = ">=6.1.1" },
-    { name = "rich", specifier = ">=15.0.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pyinstaller", specifier = ">=6.21.0" }]
 
 [[package]]
 name = "pefile"

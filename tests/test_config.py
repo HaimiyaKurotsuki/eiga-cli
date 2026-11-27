@@ -1,5 +1,4 @@
 import json
-import ssl
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,15 +40,18 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual("https://good.example", config.moviesda)
             self.assertEqual("https://good.example", json.loads(cache.read_text())["domains"]["moviesda"])
 
-    def test_ssl_context_falls_back_to_bundled_roots_when_system_store_is_empty(self):
-        # Frozen builds can have no usable system CA store; the bundled
-        # certifi roots must still be used for the config download.
-        fallback = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        with mock.patch("src.config.ssl.create_default_context",
-                        side_effect=[ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT), fallback]) as create:
-            context = _ssl_context()
-        self.assertIs(fallback, context)
-        self.assertEqual(certifi.where(), create.call_args.kwargs["cafile"])
+    def test_ssl_context_always_loads_bundled_roots_and_then_platform_store(self):
+        # Frozen builds may have no usable system CA store; the bundled
+        # certifi roots must still be present, while custom local CAs are
+        # retained by loading the platform store as well.
+        context = mock.MagicMock()
+        with mock.patch("src.config.ssl.create_default_context", return_value=context) as create:
+            self.assertIs(context, _ssl_context())
+            self.assertEqual(certifi.where(), create.call_args.kwargs["cafile"])
+            context.load_default_certs.assert_called_once_with()
+
+            context.load_default_certs.side_effect = OSError("no platform store")
+            self.assertIs(context, _ssl_context())
 
     def test_local_settings_work_without_domain_fields(self):
         with tempfile.TemporaryDirectory() as directory:
