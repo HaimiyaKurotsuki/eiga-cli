@@ -27,6 +27,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual("~/Movies", config.download_path)
             offline = Config(local, cache, lambda _: (_ for _ in ()).throw(OSError("offline")))
             self.assertEqual("https://new.example", offline.moviesda)
+            self.assertEqual("https://old.example", json.loads(local.read_text())["domains"]["moviesda"])
+            self.assertEqual({"domains"}, set(json.loads(cache.read_text())))
 
     def test_invalid_update_never_replaces_last_good_cache(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -61,6 +63,57 @@ class ConfigTests(unittest.TestCase):
             config = Config(local, root / "cache.json")
             self.assertEqual("~/Movies", config.download_path)
             self.assertEqual("https://moviesda.ski", config.moviesda)
+
+    def test_custom_endpoints_are_applied_and_templates_filled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            local = root / "local.json"
+            local.write_text(json.dumps({"endpoints": {
+                "moviesda_home": "/start.html",
+                "moviesda_atoz": "/all/",
+                "moviesda_by_year": "/year/{year}/",
+                "moviesda_by_letter": "/letter/{first}/",
+                "dubbed_movies": "/dubbed-all/",
+                "isaidub_atoz_dubbed": "/dubbed/{first}/",
+                "isaidub_by_letter_dubbed": "/dubbed/letter/{first}",
+                "isaidub_by_year_dubbed": "/dubbed/{year}/",
+            }}))
+            config = Config(local, root / "cache.json")
+        self.assertEqual("https://moviesda.ski/start.html", config.moviesda_home_endpoint)
+        self.assertEqual("/year/2024/", config.endpoint("moviesda_by_year", year="2024"))
+        self.assertEqual("/letter/a/", config.endpoint("moviesda_by_letter", first="a"))
+        self.assertEqual("/dubbed/2025/", config.endpoint("isaidub_by_year_dubbed", year="2025"))
+        self.assertEqual("/dubbed/letter/a", config.endpoint("isaidub_by_letter_dubbed", first="a"))
+        self.assertEqual("/dubbed-all/", config.dubbed_movies_path)
+
+    def test_missing_and_invalid_endpoints_fall_back_to_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            local = root / "local.json"
+            local.write_text(json.dumps({"endpoints": {
+                "moviesda_atoz": "not-a-path",
+                "dubbed_movies": 42,
+            }}))
+            config = Config(local, root / "cache.json")
+        self.assertEqual("/tamil-atoz-movies/", config.moviesda_atoz_path)
+        self.assertEqual("/tamil-dubbed-movies/", config.dubbed_movies_path)
+        self.assertEqual("/tamil-movies/{first}/", config.moviesda_by_letter_path)
+        self.assertEqual("/tamil-atoz-dubbed-movies/{first}",
+                         config.isaidub_by_letter_dubbed_path)
+
+    def test_builtin_remote_url_is_used_even_if_local_config_url_differs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            local = root / "local.json"
+            local.write_text(json.dumps({
+                "config_url": "https://attacker.example/config.json",
+            }))
+            requested = []
+            config = Config(local, root / "cache.json",
+                            lambda url: (requested.append(url), b'{"domains":{}}')[1])
+            config.fetch_config()
+        self.assertEqual([config.config_url], requested)
+        self.assertIn("raw.githubusercontent.com", config.config_url)
 
 
 if __name__ == "__main__":

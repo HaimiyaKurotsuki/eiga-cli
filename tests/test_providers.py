@@ -6,35 +6,53 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from src.config import Config
+from src.providers import (
+    DubbedProvider,
+    IsaidubProvider,
+    MoviesdaProvider,
+    ProviderRequest,
+    choose_link,
+)
+from src.providers.dubbed.provider import TaggedLink
 from src.scraper import Link, Page, ScrapeError
-from src.search import Search, choose_link
 
 
-class SearchTests(unittest.IsolatedAsyncioTestCase):
+def test_config(directory: str) -> Config:
+    root = Path(directory)
+    return Config(root / "missing", root / "cache")
+
+
+class ProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_picker_returns_original_link_instead_of_dictionary(self):
         links = [Link("First", "https://site.example/first"),
                  Link("Second", "https://site.example/second")]
-        with patch("src.search.inquirer.fuzzy") as fuzzy:
+        with patch("src.providers.base.inquirer.fuzzy") as fuzzy:
             fuzzy.return_value.execute_async = AsyncMock(return_value=1)
             selected = await choose_link("Choose:", links)
         self.assertIs(selected, links[1])
         self.assertEqual([0, 1], [choice.value for choice in fuzzy.call_args.kwargs["choices"]])
 
-    async def test_latest_result_selection_uses_original_link(self):
+    async def test_provider_resolve_returns_selected_title_and_final_url(self):
         chosen = Link("Movie", "https://site.example/movie")
         media = Link("Movie", "https://site.example/file.mp4", chosen.url)
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
-            search = Search(config)
-            search.list_latest = True
-            with patch("src.search.inquirer.fuzzy") as fuzzy, \
-                 patch.object(search, "latest_movies", new=AsyncMock(return_value=[chosen])), \
-                 patch.object(search, "resolve", new=AsyncMock(return_value=media)) as resolver:
+            provider = MoviesdaProvider(test_config(directory))
+            with patch("src.providers.base.inquirer.fuzzy") as fuzzy, \
+                 patch.object(provider, "list_movies", new=AsyncMock(return_value=[chosen])), \
+                 patch.object(provider, "resolve_link", new=AsyncMock(return_value=media)) as resolver:
                 fuzzy.return_value.execute_async = AsyncMock(return_value=0)
-                self.assertTrue(await search.show_results_tui())
-            self.assertIs(resolver.await_args.args[1], chosen)
-            self.assertEqual({"title": "Movie", "movie_url": chosen.url}, search.selected_movie)
-            self.assertEqual(media.url, search.selected_server_url)
+                resolved = await provider.resolve(None, ProviderRequest(query="movie"))
+        self.assertIs(resolver.await_args.args[1], chosen)
+        self.assertEqual("Movie", resolved.title)
+        self.assertEqual(media.url, resolved.url)
+        self.assertEqual(chosen.url, resolved.referer)
+
+    async def test_empty_provider_results_raise_clear_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provider = MoviesdaProvider(test_config(directory))
+            with patch.object(provider, "list_movies", new=AsyncMock(return_value=[])):
+                with self.assertRaisesRegex(ValueError, "No movies found"):
+                    await provider.resolve(None, ProviderRequest(query="missing"))
 
     async def test_multiple_servers_use_original_link(self):
         def handler(request):
@@ -44,11 +62,11 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, headers={"Content-Type": "video/mp4"}, content=b"x")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                with patch("src.search.inquirer.fuzzy") as fuzzy:
+                with patch("src.providers.base.inquirer.fuzzy") as fuzzy:
                     fuzzy.return_value.execute_async = AsyncMock(return_value=1)
-                    media = await Search(config).resolve(client, Link("Movie", "https://site.example/start"))
+                    media = await MoviesdaProvider(test_config(directory)).resolve_link(
+                        client, Link("Movie", "https://site.example/start"))
         self.assertEqual("https://site.example/server2", media.url)
         self.assertEqual([0, 1], [choice.value for choice in fuzzy.call_args.kwargs["choices"]])
 
@@ -63,11 +81,11 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, headers={"Content-Type": "video/mp4"}, content=b"x")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                with patch("src.search.inquirer.fuzzy") as fuzzy:
+                with patch("src.providers.base.inquirer.fuzzy") as fuzzy:
                     fuzzy.return_value.execute_async = AsyncMock(return_value=0)
-                    media = await Search(config).resolve(client, Link("Movie", "https://site.example/start"))
+                    media = await MoviesdaProvider(test_config(directory)).resolve_link(
+                        client, Link("Movie", "https://site.example/start"))
         self.assertEqual("https://site.example/server2", media.url)
 
     async def test_series_episodes_include_later_pages(self):
@@ -94,12 +112,14 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("Unexpected URL or attempted media download")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
+            config = test_config(directory)
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                with patch("src.search.inquirer.fuzzy") as fuzzy:
+                with patch("src.providers.base.inquirer.fuzzy") as fuzzy:
                     fuzzy.return_value.execute_async = AsyncMock(return_value=3)
-                    media = await Search(config).resolve(client, Link("Show", "https://site.example/show"))
-                    again = await Search(config).resolve(client, Link("Show", "https://site.example/show"))
+                    media = await MoviesdaProvider(config).resolve_link(
+                        client, Link("Show", "https://site.example/show"))
+                    again = await MoviesdaProvider(config).resolve_link(
+                        client, Link("Show", "https://site.example/show"))
         self.assertEqual("https://cdn.example/episode1.mp4", media.url)
         self.assertEqual(media.url, again.url)
         self.assertIn("https://site.example/season?page=2", calls)
@@ -125,12 +145,12 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("The movie file should not be fetched")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                media = await Search(config).resolve(client, Link("Nanban (2012)", "https://site.example/nanban"))
+                media = await MoviesdaProvider(test_config(directory)).resolve_link(
+                    client, Link("Nanban (2012)", "https://site.example/nanban"))
         self.assertEqual("https://cdn.example/Nanban%20%282012%29.mp4?signature=abc", media.url)
 
-    async def test_dubbed_search_discovers_other_host_and_later_page(self):
+    async def test_isaidub_search_discovers_other_host_and_later_page(self):
         calls = []
 
         def handler(request):
@@ -146,11 +166,131 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
                 <div class=pagination><a href='?page=2'>2</a></div>""")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                result = await Search(config).search_movies(client, "virus", dubbed=True)
+                result = await IsaidubProvider(test_config(directory)).list_movies(
+                    client, ProviderRequest(query="virus"))
         self.assertEqual("https://catalogue.example/virus/", result[0].url)
         self.assertIn("https://catalogue.example/tamil-atoz-dubbed-movies/v?page=2", calls)
+
+    async def test_isaidub_without_query_lists_the_dubbed_endpoint(self):
+        calls = []
+
+        def handler(request):
+            calls.append(str(request.url))
+            path = request.url.path
+            if path == "/":
+                return httpx.Response(200, text="<a href='/tamil-atoz-dubbed-movies/'>A-Z</a>")
+            return httpx.Response(200, text="<div class=f><a href='/movie/'>Dubbed Movie</a></div>")
+
+        with tempfile.TemporaryDirectory() as directory:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                provider = IsaidubProvider(test_config(directory))
+                result = await provider.list_movies(client, ProviderRequest())
+        self.assertEqual("https://isaiidub.com/movie/", result[0].url)
+        self.assertIn("https://isaiidub.com/tamil-dubbed-movies/", calls)
+
+    async def test_moviesda_latest_uses_the_home_endpoint(self):
+        calls = []
+
+        def handler(request):
+            calls.append(str(request.url))
+            return httpx.Response(200, text="""
+                <div class=latest><strong>New Release</strong>
+                  <a class=green href='/new-release/'>Download Now</a></div>""")
+
+        with tempfile.TemporaryDirectory() as directory:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                result = await MoviesdaProvider(test_config(directory)).list_movies(
+                    client, ProviderRequest(latest=True))
+        self.assertEqual("https://moviesda.ski/new-release/", result[0].url)
+        self.assertEqual(["https://moviesda.ski/home.html"], calls)
+
+    async def test_isaidub_rejects_latest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provider = IsaidubProvider(test_config(directory))
+            with self.assertRaisesRegex(ValueError, "only supported by the moviesda provider"):
+                await provider.list_movies(None, ProviderRequest(latest=True))
+
+    async def test_dubbed_provider_merges_both_sources_with_source_tags(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provider = DubbedProvider(test_config(directory))
+            with patch.object(provider.moviesda, "dubbed_movies", new=AsyncMock(
+                    return_value=[Link("Indian Dub", "https://moviesda.ski/indian/")])), \
+                 patch.object(provider.isaidub, "list_movies", new=AsyncMock(
+                     return_value=[Link("Overseas Dub", "https://isaiidub.com/overseas/")])):
+                movies = await provider.list_movies(
+                    None, ProviderRequest(query="dub", year="2026"))
+        self.assertEqual(2, len(movies))
+        self.assertEqual(["[Moviesda] Indian Dub", "[Isaidub] Overseas Dub"],
+                         [provider.label(movie) for movie in movies])
+
+    async def test_dubbed_provider_keeps_duplicate_titles_from_both_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provider = DubbedProvider(test_config(directory))
+            with patch.object(provider.moviesda, "dubbed_movies", new=AsyncMock(
+                    return_value=[Link("Virus", "https://moviesda.ski/virus/")])), \
+                 patch.object(provider.isaidub, "list_movies", new=AsyncMock(
+                     return_value=[Link("Virus", "https://isaiidub.com/virus/")])):
+                movies = await provider.list_movies(None, ProviderRequest(query="virus"))
+        self.assertEqual(["https://moviesda.ski/virus/", "https://isaiidub.com/virus/"],
+                         [movie.url for movie in movies])
+
+    async def test_dubbed_provider_warns_and_keeps_working_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provider = DubbedProvider(test_config(directory))
+            failure = ScrapeError("https://isaiidub.com/", "offline")
+            with patch.object(provider.moviesda, "dubbed_movies", new=AsyncMock(
+                    return_value=[Link("Indian Dub", "https://moviesda.ski/indian/")])), \
+                 patch.object(provider.isaidub, "list_movies", new=AsyncMock(
+                     side_effect=failure)), \
+                 patch("src.providers.dubbed.provider.console") as console:
+                movies = await provider.list_movies(None, ProviderRequest(query="dub"))
+        self.assertEqual("https://moviesda.ski/indian/", movies[0].url)
+        self.assertEqual(1, len(provider.warnings))
+        self.assertIn("Isaidub", provider.warnings[0])
+        console.print.assert_called_once()
+
+    async def test_dubbed_provider_uses_the_configured_moviesda_dubbed_endpoint(self):
+        calls = []
+
+        def handler(request):
+            calls.append(str(request.url))
+            if request.url.host == "moviesda.ski":
+                if request.url.path == "/home.html":
+                    return httpx.Response(200, text="<a href='/tamil-atoz-movies/'>A-Z</a>")
+                return httpx.Response(200, text="<div class=f><a href='/indian/'>Indian Dub</a></div>")
+            if request.url.path == "/":
+                return httpx.Response(200, text="<a href='/tamil-atoz-dubbed-movies/'>A-Z</a>")
+            return httpx.Response(200, text="<div class=f><a href='/overseas/'>Overseas Dub</a></div>")
+
+        with tempfile.TemporaryDirectory() as directory:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                movies = await DubbedProvider(test_config(directory)).list_movies(
+                    client, ProviderRequest(query="dub"))
+        self.assertIn("https://moviesda.ski/tamil-dubbed-movies/", calls)
+        self.assertIn("https://isaiidub.com/tamil-atoz-dubbed-movies/d", calls)
+        self.assertEqual([movie.url for movie in movies],
+                         ["https://moviesda.ski/indian/", "https://isaiidub.com/overseas/"])
+
+    async def test_dubbed_picker_shows_source_tags(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provider = DubbedProvider(test_config(directory))
+            with patch.object(provider, "list_movies", new=AsyncMock(return_value=[
+                    TaggedLink("Indian", "https://a.example", "", "Moviesda")])), \
+                 patch.object(provider, "resolve_link", new=AsyncMock(
+                     return_value=Link("Indian", "https://cdn.example/file.mp4"))), \
+                 patch("src.providers.base.inquirer.fuzzy") as fuzzy:
+                fuzzy.return_value.execute_async = AsyncMock(return_value=0)
+                resolved = await provider.resolve(None, ProviderRequest(query="dub"))
+        self.assertEqual("https://cdn.example/file.mp4", resolved.url)
+        self.assertEqual(["[Moviesda] Indian"],
+                         [choice.name for choice in fuzzy.call_args.kwargs["choices"]])
+
+    async def test_dubbed_provider_rejects_latest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            provider = DubbedProvider(test_config(directory))
+            with self.assertRaisesRegex(ValueError, "only supported by the moviesda provider"):
+                await provider.list_movies(None, ProviderRequest(latest=True))
 
     async def test_resolver_follows_choices_to_verified_media(self):
         def handler(request):
@@ -161,19 +301,19 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, headers={"Content-Type": "video/mp4"}, content=b"x")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                media = await Search(config).resolve(client, Link("Movie", "https://site.example/start"))
+                media = await MoviesdaProvider(test_config(directory)).resolve_link(
+                    client, Link("Movie", "https://site.example/start"))
         self.assertEqual("https://site.example/file", media.url)
         self.assertEqual("https://site.example/quality", media.referer)
 
     async def test_first_page_failure_propagates(self):
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request:
                     httpx.Response(503))) as client:
                 with self.assertRaises(ScrapeError):
-                    await Search(config).search_movies(client, "leo")
+                    await MoviesdaProvider(test_config(directory)).list_movies(
+                        client, ProviderRequest(query="leo"))
 
     async def test_complete_catalogue_is_reused_for_repeat_search(self):
         calls = []
@@ -183,13 +323,12 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, text="<div class=f><a href='/leo/'>Leo (2023)</a></div>")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache.json")
+            provider = MoviesdaProvider(test_config(directory))
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                first = await Search(config)._collect(client, "https://site.example/catalogue", "leo")
-                second = await Search(config)._collect(client, "https://site.example/catalogue", "leo")
+                first = await provider.collect(client, "https://site.example/catalogue", "leo")
+                second = await provider.collect(client, "https://site.example/catalogue", "leo")
         self.assertEqual(first, second)
         self.assertEqual(1, len(calls))
-
 
     async def test_path_style_pagination_collects_all_episodes_and_labels_failures(self):
         calls = []
@@ -214,12 +353,13 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(f"Unexpected request: {request.url}")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
+            config = test_config(directory)
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                with patch("src.search.inquirer.fuzzy") as fuzzy:
+                with patch("src.providers.base.inquirer.fuzzy") as fuzzy:
                     fuzzy.return_value.execute_async = AsyncMock(return_value=1)
-                    media = await Search(config).resolve(client, Link("Show", "https://site.example/show"))
-                labels = [choice.name for choice in fuzzy.call_args.kwargs["choices"]]
+                    media = await MoviesdaProvider(config).resolve_link(
+                        client, Link("Show", "https://site.example/show"))
+                    labels = [choice.name for choice in fuzzy.call_args.kwargs["choices"]]
         self.assertEqual("https://cdn.example/ep2.mp4", media.url)
         self.assertIn("https://site.example/season/v/2", calls)
         self.assertIn("https://site.example/season/v/3", calls)
@@ -243,12 +383,12 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(f"Unexpected request: {request.url}")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                with patch("src.search.inquirer.fuzzy") as fuzzy:
+                with patch("src.providers.base.inquirer.fuzzy") as fuzzy:
                     fuzzy.return_value.execute_async = AsyncMock(return_value=1)
-                    media = await Search(config).resolve(client, Link("Show", "https://site.example/start"))
-                labels = [choice.name for choice in fuzzy.call_args.kwargs["choices"]]
+                    media = await MoviesdaProvider(test_config(directory)).resolve_link(
+                        client, Link("Show", "https://site.example/start"))
+                    labels = [choice.name for choice in fuzzy.call_args.kwargs["choices"]]
         self.assertEqual("https://cdn.example/e2.mp4", media.url)
         self.assertIn("https://site.example/start?page=2", calls)
         self.assertEqual(["Epi 1", "Epi 2"], labels)
@@ -271,13 +411,12 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(f"Unexpected request: {request.url}")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
-            search = Search(config)
+            provider = MoviesdaProvider(test_config(directory))
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                with patch("src.search.inquirer.fuzzy") as fuzzy:
+                with patch("src.providers.base.inquirer.fuzzy") as fuzzy:
                     fuzzy.return_value.execute_async = AsyncMock(return_value=1)
-                    first = await search.resolve(client, Link("Show", "https://site.example/show"))
-                    second = await search.resolve(client, Link("Show", "https://site.example/show"))
+                    first = await provider.resolve_link(client, Link("Show", "https://site.example/show"))
+                    second = await provider.resolve_link(client, Link("Show", "https://site.example/show"))
         self.assertEqual(first.url, second.url)
         self.assertEqual(1, calls.count("https://site.example/season/v/2"))
 
@@ -294,11 +433,11 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError(f"Unexpected request: {request.url}")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                with patch("src.search.inquirer.fuzzy") as fuzzy:
+                with patch("src.providers.base.inquirer.fuzzy") as fuzzy:
                     fuzzy.return_value.execute_async = AsyncMock(return_value=0)
-                    media = await Search(config).resolve(client, Link("Movie", "https://site.example/start"))
+                    media = await MoviesdaProvider(test_config(directory)).resolve_link(
+                        client, Link("Movie", "https://site.example/start"))
         self.assertEqual("https://site.example/file", media.url)
 
     async def test_hls_only_server_reports_clear_error(self):
@@ -309,22 +448,21 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
                                   text="#EXTM3U\n")
 
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
             async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
                 with self.assertRaisesRegex(ScrapeError, "HLS streaming only"):
-                    await Search(config).resolve(client, Link("Movie", "https://site.example/start"))
+                    await MoviesdaProvider(test_config(directory)).resolve_link(
+                        client, Link("Movie", "https://site.example/start"))
 
     async def test_resolve_canonicalizes_legacy_raw_space_media_url(self):
         raw_page = Page("https://cdn.example/Tamil 2026 Movies/Epi 04).mp4?htag=a&etag=b",
                         None, "video/mp4")
         with tempfile.TemporaryDirectory() as directory:
-            config = Config(Path(directory) / "missing", Path(directory) / "cache")
-            search = Search(config)
+            provider = MoviesdaProvider(test_config(directory))
             async with httpx.AsyncClient(transport=httpx.MockTransport(
                     lambda _: httpx.Response(200))) as client:
-                with patch.object(search.scraper, "fetch_page",
+                with patch.object(provider.scraper, "fetch_page",
                                   new=AsyncMock(return_value=raw_page)):
-                    media = await search.resolve(client, Link("Movie", "https://site.example/start"))
+                    media = await provider.resolve_link(client, Link("Movie", "https://site.example/start"))
         self.assertEqual(
             "https://cdn.example/Tamil%202026%20Movies/Epi%2004).mp4?htag=a&etag=b",
             media.url,
