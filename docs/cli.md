@@ -7,7 +7,8 @@ Source of truth: `src/argparser.py`, `main.py`, `README.md`,
 
 | Flag | Effect |
 | --- | --- |
-| `--tamil` | Required by validation; selects the moviesda provider (confirmed by the project owner: mandatory, no default) |
+| `--tamil` | Selects the moviesda provider; required unless `--english` is given (confirmed by the project owner: mandatory, no default) |
+| `--english` | Selects the isaidub English movie catalogue; requires `--search` |
 | `--tamil --dubbed -s MOVIE` | Searches **both** dubbed catalogues (moviesda + isaidub) and merges the results; `-y` is optional |
 | `--tamil --latest` | Uses the moviesda home endpoint's latest-release cards |
 | `-s`, `--search MOVIE...` | Search words joined with spaces into one query |
@@ -22,18 +23,25 @@ Source of truth: `src/argparser.py`, `main.py`, `README.md`,
 
 Each condition calls `self.parser.error(...)`:
 
-1. `--tamil` missing → `Choose a source with --tamil (add --dubbed for isaidub).`
-2. `--dubbed` and `--latest` together → `--tamil --dubbed --latest is not supported yet.`
-3. `--latest` with `--search` or `--year` → `--latest cannot be combined with --search or --year.`
+1. Neither `--tamil` nor `--english` →
+   `Choose a source with --tamil or --english (add --dubbed with --tamil for isaidub).`
+2. `--english` and `--tamil` together → `--english cannot be combined with --tamil.`
+3. `--english` and `--dubbed` together → `--english cannot be combined with --dubbed.`
+4. `--english` and `--latest` together → `--english --latest is not supported yet.`
+5. `--dubbed` and `--latest` together → `--tamil --dubbed --latest is not supported yet.`
+6. `--latest` with `--search` or `--year` → `--latest cannot be combined with --search or --year.`
    Confirmed by the project owner: the latest list is very small, so search/year
    are not useful there.
-4. `--year` without `--search` → `--year requires --search.`
-5. `--dubbed` without `--search` → `--dubbed requires --search.`
-6. No `--search` and no `--latest` →
-   `Enter --tamil --search MOVIE or --tamil --latest.`
+7. `--year` without `--search` → `--year requires --search.`
+8. `--english` without `--search` → `--english requires --search.`
+9. `--dubbed` without `--search` → `--dubbed requires --search.`
+10. No `--search` and no `--latest` →
+    `Enter --tamil --search MOVIE, --english --search MOVIE or --tamil --latest.`
 
 A bare `--tamil --dubbed` is rejected, per the project owner. `--dubbed` requires
-a query, while `-y` stays optional beside it.
+a query, while `-y` stays optional beside it. `--english` is an alternative
+source flag, not an extra filter: it must be used alone, and `-y` is optional
+beside its required query.
 
 `--tamil --dubbed -s MOVIE` uses `DubbedProvider`, which queries the moviesda
 dubbed catalogue and the isaidub catalogue in parallel and returns one merged
@@ -47,6 +55,8 @@ printed and results from the other source are used.
 eiga-cli --tamil -s leo -y 2023
 eiga-cli --tamil --dubbed -s "Spider Man"
 eiga-cli --tamil --dubbed -s virus -y 2026
+eiga-cli --english -s "Spider Man"
+eiga-cli --english -s avatar -y 2009
 eiga-cli --tamil -s vikram --play
 eiga-cli --tamil --latest
 ```
@@ -61,9 +71,10 @@ eiga-cli --tamil --latest
 `--help` exits during `ArgParse().parse()`, before `Config()` and before any
 network request (also noted in `main.py`).
 
-## Planned language flags (not implemented)
+## Language flags
 
-`--tamil` is currently the only language/provider flag. The project owner plans
-to add others in the same pattern, e.g. `--english` for native English movies
-and `--english --dubbed` for English dubbed movies. These are not in the parser
-yet; see [providers.md](providers.md).
+`--tamil` and `--english` are the implemented language/provider flags. `--english`
+searches native English movies in the isaidub catalogue; the project owner also
+plans `--english --dubbed` for English dubbed movies and further languages in the
+same pattern. `--english --dubbed` is deliberately rejected for now; see
+[providers.md](providers.md).

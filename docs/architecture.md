@@ -18,8 +18,10 @@ under `if __name__ == "__main__"`.
 5. It catches `KeyboardInterrupt` (returns 130) and `(ScrapeError, ValueError)`
    (prints in red, returns 1).
 
-`run()` builds the provider through `get_provider(config, dubbed=args.dubbed)`,
-creates `ProviderRequest(query=args.query, year=args.year, latest=args.latest)`,
+`run()` builds the provider through
+`get_provider(config, dubbed=args.dubbed, english=args.english)`, creates
+`ProviderRequest(query=args.query, year=args.year, latest=args.latest,
+english=args.english)`,
 and opens one `httpx.AsyncClient(follow_redirects=True, timeout=30,
 headers=config.headers)` for the whole resolution. It then calls
 `await provider.resolve(client, request)`.
@@ -40,6 +42,8 @@ flowchart TD
     C --> D[get_provider]
     D -->|dubbed| D2[DubbedProvider]
     D2 --> D3[Moviesda dubbed + Isaidub, in parallel]
+    D -->|english| D4[IsaidubProvider English catalogue]
+    D4 --> E
     D -->|plain tamil| E[Provider.resolve]
     D3 --> E
     E --> F[Provider.list_movies: source-specific catalogue]
@@ -67,7 +71,7 @@ in `src/media.py`.
 | `src/utils.py` | URL canonicalization and text filters |
 | `src/providers/base.py` | Shared provider contract and shared resolution flow |
 | `src/providers/moviesda/provider.py` | Moviesda catalogue, latest releases and dubbed catalogue |
-| `src/providers/isaidub/provider.py` | Isaidub dubbed catalogue listing/search |
+| `src/providers/isaidub/provider.py` | Isaidub dubbed and English catalogue listing/search |
 | `src/providers/dubbed/provider.py` | `--dubbed`: merges moviesda + isaidub into one tagged list |
 
 ## Fetching and security rules in `src/scraper.py`

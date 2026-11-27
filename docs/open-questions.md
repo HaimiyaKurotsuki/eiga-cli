@@ -33,10 +33,10 @@ this point.
     owner and work fine. Repository tests only use mocks; no live playback test
     was added here.
 13. Docs stay in `docs/` and are linked from `README.md`.
-14. More language flags are **planned** by the owner, following the current
-    `--tamil` model: `--english` for native English movies, `--english --dubbed`
-    for English dubbed movies, and so on for other languages. None of these are
-    implemented in this tree yet.
+14. More language flags follow the current `--tamil` model. `--english` is
+    implemented for native English movies via isaidub's English catalogue, with
+    the year used as a title filter. `--english --dubbed` for English dubbed
+    movies, and further languages, are still planned and not implemented.
 15. The built-in GitHub config URL stays authoritative; the remote file is the
     source of truth for domains and the local file/cache is the fallback. The
     unused `config_url` field was removed from `config/config.json`.

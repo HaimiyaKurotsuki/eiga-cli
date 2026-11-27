@@ -18,6 +18,7 @@ Source of truth: `src/config.py`, `src/cache.py`, `config/config.json`,
 | `endpoints.isaidub_atoz_dubbed` | `/tamil-atoz-dubbed-movies/` |
 | `endpoints.isaidub_by_letter_dubbed` | `/tamil-atoz-dubbed-movies/{first}` |
 | `endpoints.isaidub_by_year_dubbed` | `/tamil-{year}-dubbed-movies/` |
+| `endpoints.isaidub_english_movies` | `/movie/hollywood-movies-in-english/` |
 | `headers` | `{"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"}` |
 | `junk_titles` | `[]` |
 
@@ -31,6 +32,8 @@ Source of truth: `src/config.py`, `src/cache.py`, `config/config.json`,
   `{first}` and `{year}` placeholders are filled by `Config.endpoint()`.
   `dubbed_movies` is used by moviesda in `--dubbed` and by isaidub for direct
   no-query callers; the CLI itself requires `-s` with `--dubbed`.
+  `isaidub_english_movies` is the English catalogue used by `--english`; it
+  has no `{year}` template because that catalogue is not year-based.
 - `headers`: the owner does not know why this field was introduced (it came from
   AI-generated configuration). It is kept because the code uses it: it is passed
   to the `httpx` client and to `Media`/VLC/yt-dlp/ffmpeg handoff.
@@ -66,7 +69,8 @@ local `config_url` is ignored.
 
 `_apply()` sets `moviesda`, `isaidub`, endpoint path attributes for every
 `endpoints` key, plus `moviesda_home_endpoint`,
-`moviesda_dubbed_movies_endpoint`, `download_path`, `headers` and `junks`.
+`moviesda_dubbed_movies_endpoint`, `isaidub_english_movies_endpoint`,
+`download_path`, `headers` and `junks`.
 Header keys/values must be strings without CR/LF; non-conforming entries are
 dropped. Each endpoint path must be a string starting with `/` or it falls back
 to the default from `DEFAULT_CONFIG` and logs a message. Missing keys in a local

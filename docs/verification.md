@@ -15,18 +15,18 @@ With `uv`, the same commands are prefixed with `uv run`, and `uv sync` sets up
 the environment. `uv run eiga-cli --help` checks the installed console script
 without network access.
 
-At the time these notes were written, the full suite reported 64 tests, all OK,
+At the time these notes were written, the full suite reported 70 tests, all OK,
 and `compileall` produced no output.
 
 ## Test layout
 
 | File | Covers |
 | --- | --- |
-| `tests/test_argparser.py` | New flag combinations and rejected combinations |
-| `tests/test_config.py` | Domain refresh, last-known-good cache, SSL context, local settings, custom/missing/invalid endpoints, built-in update URL |
-| `tests/test_main.py` | `run()` wiring from `ProviderRequest` through `Media` |
+| `tests/test_argparser.py` | Language flag combinations, including `--english`, and rejected combinations |
+| `tests/test_config.py` | Domain refresh, last-known-good cache, SSL context, local settings, custom/missing/invalid endpoints (including the English catalogue), built-in update URL |
+| `tests/test_main.py` | `run()` wiring from `ProviderRequest` through `Media`, including the English flag |
 | `tests/test_media.py` | Filename safety, VLC/yt-dlp arguments, header handling |
-| `tests/test_providers.py` | All three providers, movie/server selection, pagination, caching, HLS fallback, combined dubbed merge and source tags |
+| `tests/test_providers.py` | All three providers, movie/server selection, pagination, caching, HLS fallback, combined dubbed merge and source tags, English search and year filtering |
 | `tests/test_scraper.py` | HTTPS/redirect checks, media detection, link discovery |
 | `tests/test_utils.py` | URL canonicalization and rejected URLs |
 

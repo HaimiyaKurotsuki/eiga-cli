@@ -8,8 +8,8 @@ Source of truth: `src/providers/base.py`, `src/providers/moviesda/provider.py`,
 
 `src/providers/base.py` defines:
 
-- `ProviderRequest(query=None, year=None, latest=False)` — the same input shape
-  for both providers.
+- `ProviderRequest(query=None, year=None, latest=False, english=False)` — the
+  same input shape for all providers; only isaidub reads `english`.
 - `ResolvedLink(url, title, referer="")` — the final media URL plus the metadata
   `main.py` needs for the filename and headers.
 - `Provider`, an abstract class whose only required method is
@@ -25,10 +25,13 @@ Source of truth: `src/providers/base.py`, `src/providers/moviesda/provider.py`,
 - `Provider.label(link)` defaults to `link.title`; `DubbedProvider` overrides it
   to prefix `[Moviesda]` or `[Isaidub]`.
 
-`get_provider(config, *, dubbed=False)` in `src/providers/__init__.py` returns
-`DubbedProvider(config)` when `dubbed` is true, otherwise `MoviesdaProvider(config)`.
-`DubbedProvider` owns a `MoviesdaProvider` and an `IsaidubProvider` and delegates
-the two catalogue queries to them.
+`get_provider(config, *, dubbed=False, english=False)` in
+`src/providers/__init__.py` returns `IsaidubProvider(config)` when `english` is
+true, `DubbedProvider(config)` when `dubbed` is true, otherwise
+`MoviesdaProvider(config)`. Passing both `dubbed` and `english` raises
+`ValueError`; the CLI rejects that combination first. `DubbedProvider` owns a
+`MoviesdaProvider` and an `IsaidubProvider` and delegates the two catalogue
+queries to them.
 
 ## Shared steps in `Provider`
 
@@ -72,7 +75,7 @@ paths and in whether `latest` is supported. All catalogue paths now come from
 with `catalogue_root(..., config.moviesda_atoz_path)`, then opens
 `config.dubbed_movies_path` on that root and runs `collect()` with the query.
 
-## Isaidub (dubbed source used by `--tamil --dubbed`)
+## Isaidub (`--tamil --dubbed` and `--english`)
 
 `list_movies()`:
 
@@ -86,6 +89,20 @@ with `catalogue_root(..., config.moviesda_atoz_path)`, then opens
 - without a query: use `config.dubbed_movies_path`. Direct callers can still do
   this, but the CLI rejects `--dubbed` without `--search`.
 - In both cases it calls `collect()` with the query (if any).
+
+`english_movies()` (reached when `request.english` is true):
+
+- validates the search and optional year the same way as the dubbed path;
+- finds the root with
+  `catalogue_root(config.isaidub + "/", config.isaidub_english_movies_path)`
+  and opens `config.isaidub_english_movies_path` on that root;
+- calls the shared `collect()` for entries, pagination and title filtering;
+- because the catalogue has no year-based URL, applies `request.year` as a
+  strict filter on result titles containing that four-digit year.
+
+No new provider was added for English movies: the same scraper, catalogue walk
+and `resolve_link()` chain produce the final URL. The configured domain supplies
+the host; the `isaidub.green` URL in task 003 was an example, not a hardcoded host.
 
 ## Dubbed (`--tamil --dubbed -s MOVIE`)
 
@@ -137,14 +154,11 @@ two other providers instead of scraping a site itself. This is an observation
 of how moviesda, isaidub and dubbed are wired, not a published extension API;
 no other source is implemented in this tree.
 
-## Planned language flags (not implemented)
+## Language flags
 
-The project owner stated the intended direction: more language flags should
-follow the current `--tamil` pattern. Examples given:
-
-- `--english` — native English movies.
-- `--english --dubbed` — English dubbed movies.
-- Further languages would be added the same way as Tamil.
-
-These flags are **not** in `src/argparser.py` and no such providers exist. This
-section records owner-stated intent only, not implemented behavior.
+`--english` is implemented as above: the CLI passes it through
+`ProviderRequest.english` to the existing `IsaidubProvider`, whose English
+catalogue path comes from config. The project owner also intends
+`--english --dubbed` for English dubbed movies and further languages following
+the same pattern; those are not implemented, and `--english --dubbed` is
+rejected by the parser and by `get_provider()`.
