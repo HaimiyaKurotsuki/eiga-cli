@@ -1,0 +1,392 @@
+name: Release
+
+# This repository's default branch is `main`. Both branch names are handled,
+# and the bump commit is pushed back to whichever branch triggered the run.
+# Commits made by the bot (and [skip ci] commits) do not start a new run.
+on:
+  push:
+    branches:
+      - main
+      - master
+    # config/config.json is fetched by the CLI at runtime (see README), so a
+    # config-only change needs no new binaries or release. Manual releases via
+    # workflow_dispatch are unaffected by path filters.
+    paths-ignore:
+      - config/config.json
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Resume an existing release tag, e.g. v0.6.2. Leave empty for a normal bump."
+        required: false
+        type: string
+      release_commit:
+        description: "Expected full commit SHA when resuming (optional, otherwise HEAD)."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Auto-increment version & tag
+    if: github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      bump: ${{ steps.bump.outputs.bump }}
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Read version, resolve tag and update version files
+        id: bump
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+          import tomllib
+
+          def git(args):
+              proc = subprocess.run(["git", *args], capture_output=True, text=True)
+              if proc.returncode != 0:
+                  raise SystemExit(
+                      f"git {' '.join(args)} failed with exit code {proc.returncode}: "
+                      f"{proc.stderr.strip() or '(no stderr)'}"
+                  )
+              return proc.stdout.strip()
+
+          def remote_tag_sha(ref):
+              # Do not use --exit-code: exit 2 means "no match", but 128 means
+              # an auth/network error. A clean lookup returns 0 either way.
+              lines = [line for line in git(["ls-remote", "--tags", "origin", ref]).splitlines() if line.strip()]
+              return lines[0].split()[0] if lines else None
+
+          pyproject = Path("pyproject.toml")
+          current = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+          match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", current)
+          if not match:
+              raise SystemExit(f"Unsupported version format in pyproject.toml: {current!r}")
+          major, minor, patch = (int(part) for part in match.groups())
+
+          resume_tag = os.environ.get("RELEASE_TAG", "").strip()
+          if resume_tag:
+              # Recovery path: version files were already bumped and committed.
+              # Reuse that exact version; never bump it a second time.
+              if not re.fullmatch(r"v\d+\.\d+\.\d+", resume_tag):
+                  raise SystemExit(f"Invalid release_tag: {resume_tag!r}")
+              if resume_tag != f"v{current}":
+                  raise SystemExit(
+                      f"release_tag {resume_tag} does not match version files ({current}); "
+                      "refusing to resume with a mismatched version"
+                  )
+              new_version, new_tag, bump, resume = current, resume_tag, "resume", "true"
+          else:
+              # The commit that triggered this run decides the bump type.
+              message = git(["log", "-1", "--pretty=%B"]).lower()
+              if "[major]" in message:
+                  major, minor, patch = major + 1, 0, 0
+                  bump = "major"
+              elif "[minor]" in message:
+                  major, minor, patch = major, minor + 1, 0
+                  bump = "minor"
+              else:
+                  patch += 1
+                  bump = "patch"
+
+              for _ in range(100):
+                  if remote_tag_sha(f"refs/tags/v{major}.{minor}.{patch}") is None:
+                      break
+                  patch += 1
+              else:
+                  raise SystemExit("Could not find a free patch version after 100 attempts")
+
+              new_version = f"{major}.{minor}.{patch}"
+              new_tag = f"v{new_version}"
+              resume = "false"
+
+              # Three places in this project carry the version. Fail loudly if
+              # any pattern stops matching instead of releasing an inconsistent
+              # version.
+              def replace(path: str, pattern: str, replacement: str) -> None:
+                  file = Path(path)
+                  text = file.read_text(encoding="utf-8")
+                  updated, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
+                  if count != 1 or updated == text:
+                      raise SystemExit(f"Could not update version in {path}; pattern no longer matches")
+                  file.write_text(updated, encoding="utf-8")
+
+              replace("pyproject.toml", r'^(\s*version\s*=\s*")[^"]+(")', rf"\g<1>{new_version}\g<2>")
+              replace("src/config.py", r"eiga-cli/\d+\.\d+\.\d+", f"eiga-cli/{new_version}")
+              replace("PKGBUILD", r"^(pkgver=)[^\s]+", rf"\g<1>{new_version}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"version={new_version}\n")
+              out.write(f"tag={new_tag}\n")
+              out.write(f"bump={bump}\n")
+              out.write(f"resume={resume}\n")
+          print(f"{current} -> {new_tag} ({bump})")
+          PY
+
+      - name: Commit bump and push branch
+        if: steps.bump.outputs.resume != 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml src/config.py PKGBUILD
+          if git diff --cached --quiet; then
+            echo "No version changes staged; aborting." >&2
+            exit 1
+          fi
+          git commit -m "chore(release): ${TAG} [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      # GitHub requires `workflows: write` when a token creates a tag whose new
+      # commit range changes .github/workflows/* (see the 2023-11-02 changelog,
+      # "Enforcing workflow scope when creating a release"). GITHUB_TOKEN is a
+      # GitHub App token and can never be granted that scope via `permissions:`.
+      # Most releases do not touch workflow files and work with GITHUB_TOKEN;
+      # for those that do, set a RELEASE_TOKEN secret (PAT or GitHub App token
+      # with Contents: write + Workflows: write) or pre-create the tag yourself.
+      # This step is idempotent: an existing tag is verified, never moved.
+      - name: Create (or verify) release tag via Git refs API
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          HAS_ELEVATED_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
+          TAG: ${{ steps.bump.outputs.tag }}
+          EXPECTED_COMMIT: ${{ inputs.release_commit }}
+        run: |
+          set -euo pipefail
+          COMMIT="${EXPECTED_COMMIT:-$(git rev-parse HEAD)}"
+          verify_tag() {
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" >/dev/null 2>&1 || true
+            if ! git show-ref --verify --quiet "refs/tags/$TAG"; then
+              echo "Tag $TAG does not exist remotely after creation attempt" >&2
+              exit 1
+            fi
+            ACTUAL=$(git rev-parse "$TAG^{commit}")
+            if [ "$ACTUAL" != "$COMMIT" ]; then
+              echo "Tag $TAG points to $ACTUAL, expected $COMMIT; refusing to move it" >&2
+              exit 1
+            fi
+          }
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists remotely; verifying target"
+            verify_tag
+          else
+            TAG_SHA=$(gh api -X POST "repos/$GITHUB_REPOSITORY/git/tags" \
+              -f tag="$TAG" \
+              -f message="Release $TAG" \
+              -f object="$COMMIT" \
+              -f type=commit \
+              --jq .sha)
+            if ! gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$TAG" -f sha="$TAG_SHA"; then
+              if [ "$HAS_ELEVATED_TOKEN" != "true" ]; then
+                cat >&2 <<'MSG'
+          Could not create the tag with GITHUB_TOKEN. If the new commit range changes
+          .github/workflows/*, GitHub requires `workflows: write`, which GITHUB_TOKEN
+          cannot have. Fix one of these ways:
+            1. Add a repository secret RELEASE_TOKEN containing a token with
+               Contents: write AND Workflows: write (fine-grained PAT scoped to this
+               repo, or a GitHub App installation token), then re-run this workflow.
+            2. Pre-create the tag with your own credentials:
+                 git fetch origin --tags
+                 git tag -a <TAG> -m "Release <TAG>" <COMMIT>
+                 git push origin <TAG>
+               then re-run with release_tag/release_commit set to the same values.
+          The failed ref creation is safe to retry; no tag was created or moved.
+          MSG
+              fi
+              echo "Ref creation failed; re-checking for a concurrently created tag"
+              verify_tag
+            fi
+          fi
+          echo "Release tag $TAG is at $COMMIT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-latest
+            suffix: linux-x86_64
+            ext: ""
+            image: ghcr.io/yt-dlp/manylinux_2_28_x86_64-shared
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+            suffix: linux-aarch64
+            ext: ""
+            image: ghcr.io/yt-dlp/manylinux_2_28_aarch64-shared
+          - target: windows-x86_64
+            runner: windows-latest
+            suffix: windows-x86_64
+            ext: ".exe"
+            image: ""
+          - target: termux-aarch64
+            runner: ubuntu-latest
+            suffix: termux-aarch64
+            ext: ""
+            image: termux/termux-docker:aarch64
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Resolve binary and artifact names
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_NAME="eiga-cli-${{ needs.version.outputs.version }}-${{ matrix.suffix }}"
+          echo "BASE_NAME=$BASE_NAME" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=${BASE_NAME}${{ matrix.ext }}" >> "$GITHUB_ENV"
+          echo "ARTIFACT_PATH=dist/${BASE_NAME}${{ matrix.ext }}" >> "$GITHUB_ENV"
+
+      # yt-dlp's manylinux_2_28 *-shared images = glibc 2.28 (Debian 10+,
+      # Ubuntu 18.10+, RHEL 8+) AND a CPython built with --enable-shared.
+      # PyInstaller cannot use the static /opt/python/cp* interpreters in the
+      # upstream pypa images ("Python was built without a shared library").
+      - name: Build Linux binary in manylinux container (glibc 2.28)
+        if: matrix.target == 'linux-x86_64' || matrix.target == 'linux-aarch64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/work" -w /work \
+            -e BASE_NAME="$BASE_NAME" \
+            "${{ matrix.image }}" bash -c '
+              set -euxo pipefail
+              PY=/opt/shared-cpython-3.14/bin/python3.14
+              if [ ! -x "$PY" ]; then PY=/opt/shared-cpython-3.13/bin/python3.13; fi
+              "$PY" -m pip install --upgrade pip setuptools wheel
+              "$PY" -m pip install . "pyinstaller>=6.21.0"
+              "$PY" -m PyInstaller --clean --noconfirm --onefile --name "$BASE_NAME" main.py
+              test -f "dist/$BASE_NAME"
+            '
+
+      - name: Set up Python (from .python-version) for Windows
+        if: matrix.target == 'windows-x86_64'
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Build Windows x86_64 binary
+        if: matrix.target == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install . "pyinstaller>=6.21.0"
+          python -m PyInstaller --clean --noconfirm --onefile --name "$env:BASE_NAME" main.py
+          if (-not (Test-Path "dist\$($env:BASE_NAME).exe")) { throw "Binary was not produced" }
+
+      - name: Register QEMU for aarch64
+        if: matrix.target == 'termux-aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      # Termux is Bionic (not glibc). PyInstaller must compile its bootloader
+      # with Termux clang and link the SysV semaphore shim; the prebuilt Linux
+      # bootloader would not work here. The `ldd` package is required because
+      # PyInstaller calls it at import time and to resolve native libraries.
+      - name: Build Android / Termux aarch64 binary (Bionic)
+        if: matrix.target == 'termux-aarch64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod -R a+rwX "$GITHUB_WORKSPACE"
+          docker run --rm --privileged --platform linux/arm64 \
+            -v "$GITHUB_WORKSPACE:/work" -w /work \
+            -e BASE_NAME="$BASE_NAME" \
+            termux/termux-docker:aarch64 \
+            /entrypoint.sh bash -c '
+              set -euxo pipefail
+              # The Termux entrypoint re-execs via `env -i` with a whitelist,
+              # so docker -e variables are dropped. Pass it as an argument.
+              BASE_NAME="$1"
+              export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+              export TMPDIR="$PREFIX/tmp"
+              mkdir -p "$TMPDIR"
+              pkg update -y
+              pkg install -y python python-lxml ldd clang binutils make pkg-config \
+                libxml2 libxslt libandroid-sysv-semaphore
+              export LDFLAGS="-landroid-sysv-semaphore"
+              export PYINSTALLER_COMPILE_BOOTLOADER=1
+              # Termux clang marks strtok() deprecated; the PyInstaller waf
+              # build adds -Werror when compiling its bootloader, which turns
+              # that warning into a hard failure. Disable the warning category.
+              export CFLAGS="-Wno-deprecated-declarations"
+              python -m pip install --upgrade pip setuptools wheel
+              python -m pip install --no-binary=pyinstaller "pyinstaller>=6.21.0"
+              python -m pip install "beautifulsoup4>=4.15.0" "httpx>=0.28.1" \
+                "inquirerpy>=0.3.4" "rich>=15.0.0"
+              python -m pip install --no-deps .
+              python -m PyInstaller --clean --noconfirm --onefile --name "$BASE_NAME" main.py
+              test -f "dist/$BASE_NAME"
+            ' termux-build "$BASE_NAME"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT_PATH }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [version, build]
+    if: needs.version.result == 'success' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      # `gh release create --verify-tag` verifies the tag with local git, so
+      # this job needs a checkout that includes tags.
+      - name: Checkout with tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all four binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release and attach binaries
+        shell: bash
+        env:
+          # --verify-tag uses an existing ref, so GITHUB_TOKEN is normally
+          # enough; RELEASE_TOKEN is used when it was supplied for tagging.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -lh release-assets
+          gh release create "$TAG" \
+            --title "eiga-cli $VERSION" \
+            --generate-notes \
+            --verify-tag \
+            release-assets/*
