@@ -37,6 +37,7 @@ class ProviderRequest:
     query: str | None = None
     year: str | None = None
     latest: bool = False
+    english: bool = False
 
 
 @dataclass(frozen=True)

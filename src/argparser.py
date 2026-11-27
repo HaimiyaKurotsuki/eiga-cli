@@ -5,7 +5,7 @@ class ArgParse:
     def __init__(self):
         parser = argparse.ArgumentParser(
             prog="eiga-cli",
-            description="Browse, stream and download Tamil movies."
+            description="Browse, stream and download Tamil and English movies."
         )
 
         # provider selection
@@ -13,6 +13,12 @@ class ArgParse:
             "--tamil",
             action="store_true",
             help="Use the Tamil source (moviesda; both sources with --dubbed)"
+        )
+
+        parser.add_argument(
+            "--english",
+            action="store_true",
+            help="Use the isaidub English movie catalogue (requires --search)"
         )
 
         parser.add_argument(
@@ -62,23 +68,33 @@ class ArgParse:
 
     def parse(self):
         args = self.parser.parse_args()
-        if not args.tamil:
-            self.parser.error("Choose a source with --tamil (add --dubbed for isaidub).")
+        if not args.tamil and not args.english:
+            self.parser.error("Choose a source with --tamil or --english (add --dubbed with --tamil for isaidub).")
+        if args.english and args.tamil:
+            self.parser.error("--english cannot be combined with --tamil.")
+        if args.english and args.dubbed:
+            self.parser.error("--english cannot be combined with --dubbed.")
+        if args.english and args.latest:
+            self.parser.error("--english --latest is not supported yet.")
         if args.dubbed and args.latest:
             self.parser.error("--tamil --dubbed --latest is not supported yet.")
         if args.latest and (args.search or args.year):
             self.parser.error("--latest cannot be combined with --search or --year.")
         if args.year and not args.search:
             self.parser.error("--year requires --search.")
+        if args.english and not args.search:
+            self.parser.error("--english requires --search.")
         if args.dubbed and not args.search:
             self.parser.error("--dubbed requires --search.")
         if not args.search and not args.latest:
-            self.parser.error("Enter --tamil --search MOVIE or --tamil --latest.")
+            self.parser.error("Enter --tamil --search MOVIE, --english --search MOVIE or --tamil --latest.")
 
         self.query = " ".join(args.search) if args.search else None
         self.year = args.year
         self.latest = args.latest
+        self.tamil = args.tamil
         self.dubbed = args.dubbed
+        self.english = args.english
 
         # Download is the default
         self.download = not args.play

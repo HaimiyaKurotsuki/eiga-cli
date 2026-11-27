@@ -18,8 +18,9 @@ console = Console()
 
 
 async def run(args: ArgParse, config: Config) -> int:
-    provider = get_provider(config, dubbed=args.dubbed)
-    request = ProviderRequest(query=args.query, year=args.year, latest=args.latest)
+    provider = get_provider(config, dubbed=args.dubbed, english=args.english)
+    request = ProviderRequest(query=args.query, year=args.year, latest=args.latest,
+                              english=args.english)
     async with httpx.AsyncClient(follow_redirects=True, timeout=30,
                                  headers=config.headers) as client:
         resolved = await provider.resolve(client, request)

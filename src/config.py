@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
         "isaidub_atoz_dubbed": "/tamil-atoz-dubbed-movies/",
         "isaidub_by_letter_dubbed": "/tamil-atoz-dubbed-movies/{first}",
         "isaidub_by_year_dubbed": "/tamil-{year}-dubbed-movies/",
+        "isaidub_english_movies": "/movie/hollywood-movies-in-english/",
     },
     "headers": {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"},
     "junk_titles": [],
@@ -154,8 +155,10 @@ class Config:
         self.isaidub_atoz_dubbed_path = path("isaidub_atoz_dubbed")
         self.isaidub_by_letter_dubbed_path = path("isaidub_by_letter_dubbed")
         self.isaidub_by_year_dubbed_path = path("isaidub_by_year_dubbed")
+        self.isaidub_english_movies_path = path("isaidub_english_movies")
         self.moviesda_home_endpoint = self.moviesda + self.moviesda_home_path
         self.moviesda_dubbed_movies_endpoint = self.moviesda + self.dubbed_movies_path
+        self.isaidub_english_movies_endpoint = self.isaidub + self.isaidub_english_movies_path
         download_path = config.get("download_path")
         self.download_path = download_path if isinstance(download_path, str) and download_path else "~/Downloads/"
         headers = config.get("headers")
