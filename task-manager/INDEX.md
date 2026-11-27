@@ -4,3 +4,4 @@
 | :--- | :--- | :--- | :--- |
 | DONE | 2026-11-27 | Change to Provider-Based Architecture | [001-change-arci.md](tasks/001-change-arci.md) |
 | TODO | 2026-11-27 | Support Dubbed Latest Releases | [002-dubbed-latest.md](tasks/002-dubbed-latest.md) |
+| DONE | 2026-11-27 | Add English Movie Support | [003-add-english-movies.md](tasks/003-add-english-movies.md) |
