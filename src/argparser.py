@@ -8,19 +8,23 @@ class ArgParse:
             description="Browse, stream and download Tamil movies."
         )
 
-        # latest command
+        # provider selection
         parser.add_argument(
-            "command",
-            nargs="?",
-            choices=["list-latest", "list-dubbed"],
-            help="Show latest or dubbed movies"
+            "--tamil",
+            action="store_true",
+            help="Use the Tamil source (moviesda; both sources with --dubbed)"
         )
 
-        # dubbed search flag
         parser.add_argument(
             "--dubbed",
             action="store_true",
-            help="Search movie in dubbed lists"
+            help="Search both moviesda and isaidub dubbed catalogues (requires --search)"
+        )
+
+        parser.add_argument(
+            "--latest",
+            action="store_true",
+            help="Show latest moviesda releases"
         )
 
         # search
@@ -58,20 +62,23 @@ class ArgParse:
 
     def parse(self):
         args = self.parser.parse_args()
-        if args.command and args.search:
-            self.parser.error("Choose a command or --search, not both.")
+        if not args.tamil:
+            self.parser.error("Choose a source with --tamil (add --dubbed for isaidub).")
+        if args.dubbed and args.latest:
+            self.parser.error("--tamil --dubbed --latest is not supported yet.")
+        if args.latest and (args.search or args.year):
+            self.parser.error("--latest cannot be combined with --search or --year.")
         if args.year and not args.search:
             self.parser.error("--year requires --search.")
         if args.dubbed and not args.search:
             self.parser.error("--dubbed requires --search.")
-        if not args.command and not args.search:
-            self.parser.error("Enter --search MOVIE, list-latest, or list-dubbed.")
+        if not args.search and not args.latest:
+            self.parser.error("Enter --tamil --search MOVIE or --tamil --latest.")
 
         self.query = " ".join(args.search) if args.search else None
         self.year = args.year
-        self.isdubsearch = args.dubbed
-        self.latest = args.command == "list-latest"
-        self.dubbed = args.command == "list-dubbed"
+        self.latest = args.latest
+        self.dubbed = args.dubbed
 
         # Download is the default
         self.download = not args.play

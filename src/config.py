@@ -19,7 +19,16 @@ REMOTE_CONFIG_URL = "https://raw.githubusercontent.com/HaimiyaKurotsuki/eiga-cli
 DEFAULT_CONFIG = {
     "domains": {"moviesda": "https://moviesda.ski", "isaidub": "https://isaiidub.com"},
     "download_path": "~/Downloads/",
-    "endpoints": {"moviesda_home": "/home.html", "dubbed_movies": "/tamil-dubbed-movies/"},
+    "endpoints": {
+        "moviesda_home": "/home.html",
+        "moviesda_atoz": "/tamil-atoz-movies/",
+        "moviesda_by_letter": "/tamil-movies/{first}/",
+        "moviesda_by_year": "/tamil-{year}-movies/",
+        "dubbed_movies": "/tamil-dubbed-movies/",
+        "isaidub_atoz_dubbed": "/tamil-atoz-dubbed-movies/",
+        "isaidub_by_letter_dubbed": "/tamil-atoz-dubbed-movies/{first}",
+        "isaidub_by_year_dubbed": "/tamil-{year}-dubbed-movies/",
+    },
     "headers": {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"},
     "junk_titles": [],
 }
@@ -127,15 +136,26 @@ class Config:
         self.domains = validate_domains(config["domains"])
         self.moviesda = self.domains["moviesda"]
         self.isaidub = self.domains["isaidub"]
+        defaults = DEFAULT_CONFIG["endpoints"]
         endpoints = config.get("endpoints") if isinstance(config.get("endpoints"), dict) else {}
-        home_path = endpoints.get("moviesda_home", "/home.html")
-        dubbed_path = endpoints.get("dubbed_movies", "/tamil-dubbed-movies/")
-        if not isinstance(home_path, str) or not home_path.startswith("/"):
-            home_path = "/home.html"
-        if not isinstance(dubbed_path, str) or not dubbed_path.startswith("/"):
-            dubbed_path = "/tamil-dubbed-movies/"
-        self.moviesda_home_endpoint = self.moviesda + home_path
-        self.moviesda_dubbed_movies_endpoint = self.moviesda + dubbed_path
+
+        def path(name: str) -> str:
+            value = endpoints.get(name, defaults[name])
+            if not isinstance(value, str) or not value.startswith("/"):
+                Logger.log(f"Ignoring invalid {name} endpoint; using default")
+                value = defaults[name]
+            return value
+
+        self.moviesda_home_path = path("moviesda_home")
+        self.moviesda_atoz_path = path("moviesda_atoz")
+        self.moviesda_by_letter_path = path("moviesda_by_letter")
+        self.moviesda_by_year_path = path("moviesda_by_year")
+        self.dubbed_movies_path = path("dubbed_movies")
+        self.isaidub_atoz_dubbed_path = path("isaidub_atoz_dubbed")
+        self.isaidub_by_letter_dubbed_path = path("isaidub_by_letter_dubbed")
+        self.isaidub_by_year_dubbed_path = path("isaidub_by_year_dubbed")
+        self.moviesda_home_endpoint = self.moviesda + self.moviesda_home_path
+        self.moviesda_dubbed_movies_endpoint = self.moviesda + self.dubbed_movies_path
         download_path = config.get("download_path")
         self.download_path = download_path if isinstance(download_path, str) and download_path else "~/Downloads/"
         headers = config.get("headers")
@@ -145,6 +165,15 @@ class Config:
                         if isinstance(headers, dict) else {})
         junk_titles = config.get("junk_titles")
         self.junks = [title for title in junk_titles if isinstance(title, str)] if isinstance(junk_titles, list) else []
+
+    def endpoint(self, name: str, **values: str) -> str:
+        """Fill a configured path template, e.g. `year=` or `first=`."""
+        template = getattr(self, f"{name}_path")
+        try:
+            return template.format(**values)
+        except (KeyError, ValueError, IndexError) as exc:
+            Logger.log(f"Invalid {name} endpoint template {template!r}: {exc}")
+            return template
 
     def fetch_config(self) -> bool:
         """Refresh domains from the trusted repository, retaining prior values on failure."""
