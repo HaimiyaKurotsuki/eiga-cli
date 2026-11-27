@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ from src.providers import (
     MoviesdaProvider,
     ProviderRequest,
     choose_link,
+    get_provider,
 )
 from src.providers.dubbed.provider import TaggedLink
 from src.scraper import Link, Page, ScrapeError
@@ -188,6 +190,62 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                 result = await provider.list_movies(client, ProviderRequest())
         self.assertEqual("https://isaiidub.com/movie/", result[0].url)
         self.assertIn("https://isaiidub.com/tamil-dubbed-movies/", calls)
+
+    async def test_english_search_uses_shared_pagination_and_verifies_year(self):
+        calls = []
+
+        def handler(request):
+            calls.append(str(request.url))
+            if request.url.host == "isaiidub.com":
+                return httpx.Response(200, text="""
+                    <a href='https://catalogue.example/movie/hollywood-movies-in-english/'>English Movies</a>""")
+            if request.url.query:
+                return httpx.Response(200, text="""
+                    <div class=f><a href='/avatar-2009-hd/'>Avatar (2009) HD</a></div>""")
+            return httpx.Response(200, text="""
+                <div class=f><a href='/avatar-2022/'>Avatar (2022)</a>
+                <a href='/avatar-2009/'>Avatar (2009)</a></div>
+                <div class=pagination><a href='?page=2'>2</a></div>""")
+
+        with tempfile.TemporaryDirectory() as directory:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                result = await IsaidubProvider(test_config(directory)).list_movies(
+                    client, ProviderRequest(query="avatar", year="2009", english=True))
+        self.assertEqual(["https://catalogue.example/avatar-2009/",
+                          "https://catalogue.example/avatar-2009-hd/"],
+                         [link.url for link in result])
+        self.assertIn("https://catalogue.example/movie/hollywood-movies-in-english/", calls)
+        self.assertIn("https://catalogue.example/movie/hollywood-movies-in-english/?page=2", calls)
+
+    async def test_english_catalogue_path_comes_from_config(self):
+        calls = []
+
+        def handler(request):
+            calls.append(str(request.url))
+            if request.url.path == "/":
+                return httpx.Response(200, text="<html></html>")
+            return httpx.Response(200, text="<div class=f><a href='/avatar/'>Avatar</a></div>")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            local = root / "local.json"
+            local.write_text(json.dumps({
+                "endpoints": {"isaidub_english_movies": "/english/hollywood/"},
+            }))
+            config = Config(local, root / "cache.json")
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                result = await IsaidubProvider(config).list_movies(
+                    client, ProviderRequest(query="avatar", english=True))
+        self.assertIn("https://isaiidub.com/english/hollywood/", calls)
+        self.assertEqual("https://isaiidub.com/avatar/", result[0].url)
+
+    def test_provider_registry_selects_english_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = test_config(directory)
+            self.assertIsInstance(get_provider(config, english=True), IsaidubProvider)
+            self.assertIsInstance(get_provider(config), MoviesdaProvider)
+            with self.assertRaisesRegex(ValueError, "cannot be combined"):
+                get_provider(config, english=True, dubbed=True)
 
     async def test_moviesda_latest_uses_the_home_endpoint(self):
         calls = []

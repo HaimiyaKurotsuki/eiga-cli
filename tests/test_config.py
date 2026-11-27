@@ -77,6 +77,7 @@ class ConfigTests(unittest.TestCase):
                 "isaidub_atoz_dubbed": "/dubbed/{first}/",
                 "isaidub_by_letter_dubbed": "/dubbed/letter/{first}",
                 "isaidub_by_year_dubbed": "/dubbed/{year}/",
+                "isaidub_english_movies": "/english/all/",
             }}))
             config = Config(local, root / "cache.json")
         self.assertEqual("https://moviesda.ski/start.html", config.moviesda_home_endpoint)
@@ -85,6 +86,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual("/dubbed/2025/", config.endpoint("isaidub_by_year_dubbed", year="2025"))
         self.assertEqual("/dubbed/letter/a", config.endpoint("isaidub_by_letter_dubbed", first="a"))
         self.assertEqual("/dubbed-all/", config.dubbed_movies_path)
+        self.assertEqual("/english/all/", config.isaidub_english_movies_path)
+        self.assertEqual("https://isaiidub.com/english/all/",
+                         config.isaidub_english_movies_endpoint)
 
     def test_missing_and_invalid_endpoints_fall_back_to_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -93,6 +97,7 @@ class ConfigTests(unittest.TestCase):
             local.write_text(json.dumps({"endpoints": {
                 "moviesda_atoz": "not-a-path",
                 "dubbed_movies": 42,
+                "isaidub_english_movies": "not-a-path",
             }}))
             config = Config(local, root / "cache.json")
         self.assertEqual("/tamil-atoz-movies/", config.moviesda_atoz_path)
@@ -100,6 +105,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual("/tamil-movies/{first}/", config.moviesda_by_letter_path)
         self.assertEqual("/tamil-atoz-dubbed-movies/{first}",
                          config.isaidub_by_letter_dubbed_path)
+        self.assertEqual("/movie/hollywood-movies-in-english/",
+                         config.isaidub_english_movies_path)
+        self.assertEqual("https://isaiidub.com/movie/hollywood-movies-in-english/",
+                         config.isaidub_english_movies_endpoint)
 
     def test_builtin_remote_url_is_used_even_if_local_config_url_differs(self):
         with tempfile.TemporaryDirectory() as directory:

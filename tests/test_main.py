@@ -23,7 +23,7 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
                 from main import run
                 self.assertEqual(0, await run(args, config))
 
-        get_provider.assert_called_once_with(config, dubbed=True)
+        get_provider.assert_called_once_with(config, dubbed=True, english=False)
         provider.resolve.assert_awaited_once()
         client, request = provider.resolve.await_args.args
         self.assertIsNotNone(client)
@@ -32,6 +32,25 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("https://cdn.example/movie.mp4", media_class.call_args.args[0])
         self.assertEqual("Leo", media_class.call_args.args[1])
         self.assertEqual("https://site.example/page", media_class.call_args.args[3]["Referer"])
+
+    async def test_run_passes_english_flag_to_provider_and_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Config(Path(directory) / "missing", Path(directory) / "cache")
+            with patch("sys.argv", ["eiga-cli", "--english", "-s", "avatar", "-y", "2009"]):
+                args = ArgParse().parse()
+            provider = AsyncMock()
+            provider.resolve.return_value = ResolvedLink(
+                "https://cdn.example/avatar.mp4", "Avatar (2009)", "https://site.example/page")
+            with patch("main.get_provider", return_value=provider) as get_provider, \
+                 patch("main.Media") as media_class:
+                media_class.return_value.process.return_value = True
+                from main import run
+                self.assertEqual(0, await run(args, config))
+
+        get_provider.assert_called_once_with(config, dubbed=False, english=True)
+        client, request = provider.resolve.await_args.args
+        self.assertIsNotNone(client)
+        self.assertEqual(ProviderRequest("avatar", "2009", False, True), request)
 
 
 if __name__ == "__main__":

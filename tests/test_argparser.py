@@ -21,8 +21,18 @@ class ArgParseTests(unittest.TestCase):
         self.assertEqual("leo", args.query)
         self.assertEqual("2023", args.year)
         self.assertFalse(args.dubbed)
+        self.assertFalse(args.english)
         self.assertFalse(args.latest)
         self.assertTrue(args.download)
+
+    def test_english_search_and_play(self):
+        args = self.parse("--english", "-s", "Avatar", "-y", "2009", "--play")
+        self.assertEqual("Avatar", args.query)
+        self.assertEqual("2009", args.year)
+        self.assertTrue(args.english)
+        self.assertFalse(args.tamil)
+        self.assertFalse(args.dubbed)
+        self.assertFalse(args.download)
 
     def test_dubbed_search_and_play(self):
         args = self.parse("--tamil", "--dubbed", "--search", "Spider", "Man", "--play")
@@ -50,6 +60,13 @@ class ArgParseTests(unittest.TestCase):
         self.assertRejected("--tamil")
         self.assertRejected("--tamil", "--dubbed")
         self.assertRejected("--tamil", "-p", "-d")
+
+    def test_english_requires_search_and_rejects_conflicting_flags(self):
+        self.assertRejected("--english")
+        self.assertRejected("--english", "--latest")
+        self.assertRejected("--english", "-y", "2009")
+        self.assertRejected("--english", "--tamil", "-s", "avatar")
+        self.assertRejected("--english", "--dubbed", "-s", "avatar")
 
 
 if __name__ == "__main__":
