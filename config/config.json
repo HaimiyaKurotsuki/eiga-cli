@@ -12,7 +12,8 @@
         "dubbed_movies": "/tamil-dubbed-movies/",
         "isaidub_atoz_dubbed": "/tamil-atoz-dubbed-movies/",
         "isaidub_by_letter_dubbed": "/tamil-atoz-dubbed-movies/{first}",
-        "isaidub_by_year_dubbed": "/tamil-{year}-dubbed-movies/"
+        "isaidub_by_year_dubbed": "/tamil-{year}-dubbed-movies/",
+        "isaidub_english_movies": "/movie/hollywood-movies-in-english/"
     },
     "headers": {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"
