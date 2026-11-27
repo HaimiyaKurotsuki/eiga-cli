@@ -3,11 +3,16 @@
         "moviesda": "https://moviesda36.com",
         "isaidub": "https://isaiidub.com/"
     },
-    "config_url": "https://raw.githubusercontent.com/HaimiyaKurotsuki/eiga-cli/refs/heads/main/config/config.json",
     "download_path": "~/Downloads/",
     "endpoints": {
         "moviesda_home": "/home.html",
-        "dubbed_movies": "/tamil-dubbed-movies/"
+        "moviesda_atoz": "/tamil-atoz-movies/",
+        "moviesda_by_letter": "/tamil-movies/{first}/",
+        "moviesda_by_year": "/tamil-{year}-movies/",
+        "dubbed_movies": "/tamil-dubbed-movies/",
+        "isaidub_atoz_dubbed": "/tamil-atoz-dubbed-movies/",
+        "isaidub_by_letter_dubbed": "/tamil-atoz-dubbed-movies/{first}",
+        "isaidub_by_year_dubbed": "/tamil-{year}-dubbed-movies/"
     },
     "headers": {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"

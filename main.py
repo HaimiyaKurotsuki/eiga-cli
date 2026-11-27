@@ -2,30 +2,36 @@
 
 import asyncio
 import sys
+from urllib.request import Request
 
+import httpx
 from rich.console import Console
 
 from src.argparser import ArgParse
 from src.config import Config
 from src.media import Media
+from src.providers import ProviderRequest, get_provider
 from src.scraper import ScrapeError
-from src.search import Search
 
 
 console = Console()
 
 
 async def run(args: ArgParse, config: Config) -> int:
-    search = Search(config)
-    search.search_query = args.query
-    search.search_year = args.year
-    search.isdubsearch = args.isdubsearch
-    search.list_latest = args.latest
-    search.list_dubbed = args.dubbed
-    if not await search.show_results_tui():
-        return 1
-    media = Media(search.selected_server_url, search.selected_movie["title"],
-                  config.download_path, search.media_headers)
+    provider = get_provider(config, dubbed=args.dubbed)
+    request = ProviderRequest(query=args.query, year=args.year, latest=args.latest)
+    async with httpx.AsyncClient(follow_redirects=True, timeout=30,
+                                 headers=config.headers) as client:
+        resolved = await provider.resolve(client, request)
+        headers = dict(config.headers)
+        if resolved.referer:
+            headers["Referer"] = resolved.referer
+        cookie_request = Request(resolved.url)
+        client.cookies.jar.add_cookie_header(cookie_request)
+        cookie = cookie_request.get_header("Cookie")
+        if cookie:
+            headers["Cookie"] = cookie
+    media = Media(resolved.url, resolved.title, config.download_path, headers)
     return 0 if media.process(args.download) else 1
 
 
