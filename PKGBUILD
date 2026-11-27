@@ -1,6 +1,6 @@
 # Maintainer: Haimiya <349125465+HaimiyaKurotsuki@users.noreply.github.com>
 pkgname=eiga-cli
-pkgver=0.6.5
+pkgver=0.6.6
 pkgrel=1
 pkgdesc="Browse and play Tamil movies within your terminal"
 arch=('x86_64')

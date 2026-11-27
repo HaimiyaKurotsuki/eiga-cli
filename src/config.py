@@ -96,7 +96,7 @@ class Config:
 
     @staticmethod
     def _download(url: str) -> bytes:
-        request = urllib.request.Request(url, headers={"User-Agent": "eiga-cli/0.6.5"})
+        request = urllib.request.Request(url, headers={"User-Agent": "eiga-cli/0.6.6"})
         with urllib.request.urlopen(request, timeout=8, context=_ssl_context()) as response:
             if urlsplit(response.url).scheme != "https":
                 raise ConfigError("Remote config redirected to an insecure URL")
