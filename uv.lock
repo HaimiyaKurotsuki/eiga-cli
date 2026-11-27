@@ -49,7 +49,7 @@ wheels = [
 
 [[package]]
 name = "eiga-cli"
-version = "0.6.4"
+version = "0.6.5"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
