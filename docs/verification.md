@@ -60,7 +60,8 @@ added to this repository; the automated tests remain mocked.
 - The `build` job produces four one-file binaries: `linux-x86_64`,
   `linux-aarch64`, `windows-x86_64` and `termux-aarch64`. Linux builds run in
   manylinux_2_28 shared CPython images; the Termux build compiles the
-  PyInstaller bootloader with Termux clang.
+  PyInstaller bootloader with Termux clang and runs on a native aarch64 runner
+  (no QEMU emulation, which made it ~14x slower).
 - The `release` job publishes a GitHub release with the four artifacts.
 - The workflow comments describe the `RELEASE_TOKEN` secret for cases where
   `GITHUB_TOKEN` lacks workflow scope. The project owner reports that the

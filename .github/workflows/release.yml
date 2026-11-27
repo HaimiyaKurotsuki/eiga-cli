@@ -247,7 +247,10 @@ jobs:
             ext: ".exe"
             image: ""
           - target: termux-aarch64
-            runner: ubuntu-latest
+            # Use a native aarch64 host. On an x86_64 runner the whole Termux
+            # build (pkg installs, clang bootloader, PyInstaller) runs under
+            # QEMU and takes ~14 min instead of ~2-3 min.
+            runner: ubuntu-24.04-arm
             suffix: termux-aarch64
             ext: ""
             image: termux/termux-docker:aarch64
@@ -301,12 +304,6 @@ jobs:
           python -m PyInstaller --clean --noconfirm --onefile --name "$env:BASE_NAME" main.py
           if (-not (Test-Path "dist\$($env:BASE_NAME).exe")) { throw "Binary was not produced" }
 
-      - name: Register QEMU for aarch64
-        if: matrix.target == 'termux-aarch64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       # Termux is Bionic (not glibc). PyInstaller must compile its bootloader
       # with Termux clang and link the SysV semaphore shim; the prebuilt Linux
       # bootloader would not work here. The `ldd` package is required because
@@ -317,6 +314,8 @@ jobs:
         run: |
           set -euo pipefail
           chmod -R a+rwX "$GITHUB_WORKSPACE"
+          # --platform matches the native ARM runner, so Docker runs this
+          # image directly; no binfmt/QEMU emulation is involved.
           docker run --rm --privileged --platform linux/arm64 \
             -v "$GITHUB_WORKSPACE:/work" -w /work \
             -e BASE_NAME="$BASE_NAME" \
